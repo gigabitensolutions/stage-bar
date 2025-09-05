@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Admin — Produtos</title>
+  <link rel="stylesheet" href="./assets/app.css"/>
+  <script defer src="./assets/admin.js"></script>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row">
+        <h1>Admin de Produtos</h1>
+        <a class="btn" href="./index.html">← Voltar ao POS</a>
+        <button class="btn" id="importBtn">Importar JSON</button>
+        <input id="fileInput" type="file" accept="application/json" class="hidden">
+        <button class="btn" id="exportBtn">Exportar JSON</button>
+        <button class="btn accent" id="saveBtn">Salvar no POS</button>
+        <span class="muted">Armazena em <code>localStorage</code> (<b>products_cache_v1</b>).</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid admin">
+    <section class="card">
+      <h3>Novo/Editar produto</h3>
+      <div class="row">
+        <input id="pId" class="input" placeholder="id único (ex.: cerveja_lata_350)">
+        <input id="pName" class="input" placeholder="Nome (ex.: Cerveja Lata 350ml)" style="flex:1">
+        <input id="pPrice" class="input" placeholder="Preço (ex.: 12.00)" inputmode="decimal" style="width:140px">
+        <input id="pCat" class="input" placeholder="Categoria (ex.: Cerveja)" style="width:180px">
+        <input id="pImg" class="input" placeholder="Imagem (URL ou ./assets/img.png)" style="flex:1">
+        <button class="btn accent" id="addBtn">Adicionar/Atualizar</button>
+        <button class="btn danger" id="delBtn">Excluir</button>
+      </div>
+      <div class="muted" style="margin-top:6px">Dica: use caminho relativo (ex.: <code>./assets/cerveja.png</code>) para imagens no seu repositório.</div>
+    </section>
+
+    <section class="card">
+      <h3>Produtos</h3>
+      <table id="tbl">
+        <thead>
+          <tr><th>Img</th><th>ID</th><th>Nome</th><th>Preço</th><th>Categoria</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,16 @@
+[
+  { "id": "cerveja_lata_350", "name": "Cerveja Lata 350ml", "price": 12.0, "category": "Cerveja", "image": "./assets/placeholder.svg" },
+  { "id": "cerveja_long_neck", "name": "Cerveja Long Neck", "price": 15.0, "category": "Cerveja", "image": "./assets/placeholder.svg" },
+  { "id": "cerveja_balde_6", "name": "Balde 6 Cervejas", "price": 75.0, "category": "Cerveja", "image": "./assets/placeholder.svg" },
+  { "id": "dose_vodka", "name": "Dose de Vodka", "price": 18.0, "category": "Vodka", "image": "./assets/placeholder.svg" },
+  { "id": "vodka_absolut", "name": "Vodka Absolut 1L", "price": 220.0, "category": "Vodka", "image": "./assets/placeholder.svg" },
+  { "id": "dose_whiskey", "name": "Dose de Whiskey", "price": 22.0, "category": "Whiskey", "image": "./assets/placeholder.svg" },
+  { "id": "whiskey_jameson", "name": "Whiskey Jameson 750ml", "price": 260.0, "category": "Whiskey", "image": "./assets/placeholder.svg" },
+  { "id": "whiskey_jw_black", "name": "Johnnie Walker Black 1L", "price": 320.0, "category": "Whiskey", "image": "./assets/placeholder.svg" },
+  { "id": "dose_tequila", "name": "Dose de Tequila", "price": 20.0, "category": "Doses", "image": "./assets/placeholder.svg" },
+  { "id": "dose_cachaca", "name": "Dose de Cachaça", "price": 8.0, "category": "Doses", "image": "./assets/placeholder.svg" },
+  { "id": "porcao_fritas", "name": "Porção de Batata Frita", "price": 28.0, "category": "Comidas", "image": "./assets/placeholder.svg" },
+  { "id": "porcao_frango", "name": "Porção de Frango a Passarinho", "price": 45.0, "category": "Comidas", "image": "./assets/placeholder.svg" },
+  { "id": "hamburguer", "name": "Hambúrguer Artesanal", "price": 32.0, "category": "Comidas", "image": "./assets/placeholder.svg" },
+  { "id": "porcao_pastel", "name": "Porção de Pastel (10 un.)", "price": 35.0, "category": "Comidas", "image": "./assets/placeholder.svg" }
+]
