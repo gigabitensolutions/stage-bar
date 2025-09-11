@@ -1,0 +1,7 @@
+[
+  {"path":"./assets/products/cerveja.png","label":"Cerveja (lata)"},
+  {"path":"./assets/products/whisky.png","label":"Whisky"},
+  {"path":"./assets/products/vodka.png","label":"Vodka"},
+  {"path":"./assets/products/fritas.png","label":"Porção de Fritas"},
+  "./assets/placeholder.svg"
+]

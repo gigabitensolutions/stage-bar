@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Diagnóstico — Comandas</title>
+  <link rel="stylesheet" href="./assets/app.css"/>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row">
+        <h1>🧪 Diagnóstico</h1>
+        <div class="right row">
+          <a class="btn" href="./index.html">Voltar ao POS</a>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="card">
+      <h2>Configuração</h2>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <span id="cfgStatus" class="tag">—</span>
+        <button id="btnReload" class="btn">Recarregar scripts</button>
+      </div>
+      <pre id="cfgBox" class="muted" style="white-space:pre-wrap"></pre>
+    </section>
+
+    <section class="card" style="margin-top:12px">
+      <h2>API</h2>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button id="btnHealth" class="btn accent">/health</button>
+        <span id="healthStatus" class="tag">—</span>
+      </div>
+      <pre id="healthBox" class="muted" style="white-space:pre-wrap"></pre>
+
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button id="btnProds" class="btn">/products</button>
+        <span id="prodStatus" class="tag">—</span>
+      </div>
+      <pre id="prodBox" class="muted" style="white-space:pre-wrap"></pre>
+
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button id="btnTabs" class="btn">/tabs/open</button>
+        <span id="tabsStatus" class="tag">—</span>
+      </div>
+      <pre id="tabsBox" class="muted" style="white-space:pre-wrap"></pre>
+    </section>
+  </main>
+
+  <script src="./assets/firebase-config.js"></script>
+  <script src="./assets/db.firebase.js"></script>
+  <script>
+    const $ = sel => document.querySelector(sel);
+    const set = (el, text, ok=null) => {
+      el.textContent = text; el.classList.remove('ok','err');
+      if(ok===true){ el.style.borderColor='#22c55e'; el.style.color='#22c55e'; }
+      else if(ok===false){ el.style.borderColor='#ef4444'; el.style.color='#ef4444'; }
+      else{ el.style.borderColor='#64748b'; el.style.color='#94a3b8'; }
+    };
+    const show = (el, obj) => { el.textContent = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2); };
+
+    function reloadScripts(){
+      const stamp = Date.now();
+      document.querySelectorAll('script[src]').forEach(s=>{
+        const clone=document.createElement('script'); clone.src=s.src.replace(/\?.*$/, '')+'?v='+stamp; s.replaceWith(clone);
+      });
+      setTimeout(()=> location.reload(), 300);
+    }
+
+    async function boot(){
+      try{ const cfg = window.FIREBASE_CONFIG || null; set($('#cfgStatus'), cfg ? 'OK' : 'ERRO', !!cfg); show($('#cfgBox'), cfg || 'window.FIREBASE_CONFIG não encontrado'); }
+      catch(e){ set($('#cfgStatus'),'ERRO',false); show($('#cfgBox'), String(e)); }
+
+      $('#btnReload').onclick = reloadScripts;
+      $('#btnHealth').onclick = async ()=>{ try{ const r = await window.DB.healthCheck(); set($('#healthStatus'),'OK',true); show($('#healthBox'), r); } catch(e){ set($('#healthStatus'),'ERRO',false); show($('#healthBox'), e.message || String(e)); } };
+      $('#btnProds').onclick = async ()=>{ try{ const r = await window.DB.getProducts(); set($('#prodStatus'),'OK',true); show($('#prodBox'), r); } catch(e){ set($('#prodStatus'),'ERRO',false); show($('#prodBox'), e.message || String(e)); } };
+      $('#btnTabs').onclick = async ()=>{ try{ const r = await window.DB.getOpenTabs(); set($('#tabsStatus'),'OK',true); show($('#tabsBox'), r); } catch(e){ set($('#tabsStatus'),'ERRO',false); show($('#tabsBox'), e.message || String(e)); } };
+    }
+    document.addEventListener('DOMContentLoaded', boot);
+  </script>
+</body>
+</html>

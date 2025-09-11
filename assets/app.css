@@ -57,6 +57,13 @@ h1{font-size:18px; margin:0}
 /* Toolbar */
 .toolbar{display:grid; gap:8px; grid-template-columns:1fr auto auto; margin-top:8px}
 
+/* Inline "Nova comanda" */
+.newc{display:grid; gap:8px; grid-template-columns:1fr 1fr auto; align-items:center; margin-top:8px}
+.newc .swatches{justify-content:flex-start}
+@media (max-width:720px){
+  .newc{grid-template-columns:1fr}
+}
+
 /* Chips */
 .chips{display:flex; gap:8px; overflow:auto; padding:6px 0; scroll-snap-type:x mandatory}
 .chip{
@@ -155,7 +162,8 @@ main{flex:1}
 .panel h3{margin:0 0 8px}
 .form-row{display:grid; gap:8px; margin-bottom:8px}
 .swatches{display:flex; gap:10px; flex-wrap:wrap}
-.swatch{width:38px; height:38px; border-radius:999px; border:2px solid rgba(255,255,255,.25); cursor:pointer}
+.swatch{width:38px; height:38px; border-radius:999px; border:2px solid rgba(255,255,255,.25); cursor:pointer; outline:2px solid transparent}
+.swatch.active{outline:3px solid #ffffff55}
 .tag{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.25)}
 .dot{width:12px; height:12px; border-radius:999px; display:inline-block; margin-right:4px}
 

@@ -2,18 +2,14 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Comandas — POS Simples</title>
-  <meta name="description" content="POS de comandas com PIX fixo, pagamento cartão, PDF, visão geral, impressão térmica 80mm, e modo toque grande.">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <title>Comandas — GitHub Pages</title>
   <link rel="stylesheet" href="./assets/app.css"/>
   <link rel="stylesheet" href="./assets/print.css" media="print"/>
-
-  <!-- Libs: jsPDF e QRCode (CDN) -->
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-  <!-- App JS -->
-  <script defer src="./assets/pos.js"></script>
+  <!-- libs -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <header>
@@ -21,19 +17,27 @@
       <div class="row">
         <h1>🧾 Comandas</h1>
         <div class="right row">
-          <button class="btn" id="bigTouchBtn" title="Aumentar áreas de toque">Toque grande</button>
-          <select id="comandaSelect" class="select"></select>
-          <button class="btn" id="overviewBtn" title="Visão geral">Visão geral</button>
-          <button class="btn" id="newComandaBtn" title="Nova comanda">Nova</button>
-          <button class="btn danger" id="deleteComandaBtn" title="Excluir comanda atual">Excluir</button>
-          <a class="btn ghost" href="./admin.html">Admin</a>
+          <button id="bigTouchBtn" class="btn ghost" aria-pressed="false">Toque grande</button>
+          <button id="overviewBtn" class="btn">Visão geral</button>
+          <select id="comandaSelect" class="select" style="min-width:160px"></select>
+          <button id="deleteComandaBtn" class="btn danger">Excluir</button>
+          <button id="importProductsBtn" class="btn">Importar produtos</button>
+          <input id="importFile" class="hidden" type="file" accept="application/json">
         </div>
       </div>
+
+      <!-- Nova comanda inline -->
+      <div class="newc">
+        <input id="ncName" class="input" placeholder="Nome da comanda (ex.: Mesa 1)" value="Mesa 1">
+        <input id="ncLabel" class="input" placeholder="Etiqueta (opcional)">
+        <div id="ncColors" class="swatches"></div>
+        <button id="ncAdd" class="btn accent">Nova comanda</button>
+      </div>
+
       <div class="toolbar">
-        <input id="search" class="input" placeholder="Buscar produto…"/>
+        <input id="search" class="input" placeholder="Buscar produto por nome/categoria..."/>
         <button id="clearSearch" class="btn ghost">Limpar</button>
-        <button id="importProductsBtn" class="btn">Importar JSON</button>
-        <input id="importFile" type="file" accept="application/json" class="hidden" />
+        <button id="openDrawer" class="btn warn">Abrir comanda</button>
       </div>
       <div id="chips" class="chips"></div>
     </div>
@@ -43,7 +47,6 @@
     <section id="grid" class="grid"></section>
   </main>
 
-  <!-- Bottom bar -->
   <div class="bar">
     <div class="bar-inner">
       <span id="summaryCount" class="muted">0 itens</span>
@@ -52,104 +55,76 @@
     </div>
   </div>
 
-  <!-- Drawer -->
-  <div id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
-    <div class="sheet">
-      <div class="flex">
-        <div>
-          <h2 id="drawerTitle">Comanda</h2>
-          <div class="mini" id="comandaNameMini">—</div>
-          <div class="mini">Etiqueta: <span id="comandaLabelMini">—</span></div>
-        </div>
+  <!-- Drawer / Sheet -->
+  <div id="drawer" class="drawer" aria-hidden="true">
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2>Comanda: <span id="comandaNameMini">—</span> <span id="comandaLabelMini"></span></h2>
         <div class="row">
-          <button class="btn ghost" id="colorBtn">Cor</button>
-          <button class="btn ghost" id="closeDrawer">Fechar</button>
+          <button id="colorBtn" class="btn ghost" title="Cor/etiqueta">Cor</button>
+          <button id="closeDrawer" class="btn">Fechar</button>
         </div>
       </div>
 
       <div id="lines"></div>
 
-      <div class="hr"></div>
-      <label class="switch">
-        <input type="checkbox" id="sv10">
-        <span>Adicionar 10% (serviço)</span>
-      </label>
+      <div class="row totals">
+        <div class="switch">
+          <label><input id="sv10" type="checkbox"> Cobrar serviço (10%)</label>
+        </div>
+        <div class="right"></div>
+        <div><span class="muted">Subtotal:</span> <strong id="subtotalTxt">R$ 0,00</strong></div>
+        <div><span class="muted">Serviço:</span> <strong id="serviceTxt">R$ 0,00</strong></div>
+        <div><span class="muted">Total:</span> <strong id="totalTxt">R$ 0,00</strong></div>
+      </div>
 
-      <div class="hr"></div>
-      <div>
-        <div class="mini">Forma de pagamento</div>
+      <div style="margin-top:8px">
+        <div class="muted" style="margin-bottom:6px">Forma de pagamento</div>
         <div id="payMethods" class="chips"></div>
       </div>
 
-      <div class="totals">
-        <div class="line"><span>Subtotal</span><strong id="subtotalTxt">R$ 0,00</strong></div>
-        <div class="line"><span>Serviço (10%)</span><strong id="serviceTxt">R$ 0,00</strong></div>
-        <div class="line"><span>Total</span><strong id="totalTxt">R$ 0,00</strong></div>
-      </div>
-
       <div class="actions">
-        <button class="btn" id="pixBtn" title="Gerar QR PIX do total">PIX do total</button>
-        <button class="btn" id="print80Btn" title="Imprimir cupom térmico 80mm">Imprimir 80mm</button>
-        <button class="btn warn" id="pdfBtn">Gerar PDF</button>
-        <button class="btn" id="shareBtn">Compartilhar</button>
-        <button class="btn" id="clearItemsBtn">Limpar itens</button>
-        <button class="btn danger" id="closeComandaBtn">Fechar comanda</button>
-      </div>
-
-      <!-- PIX Modal -->
-      <div id="pixModal" class="modal" aria-hidden="true">
-        <div class="panel">
-          <h3>PIX do total</h3>
-          <div class="mini">Use o QR abaixo para pagar o total desta comanda.</div>
-          <div id="pixQR" class="centered"></div>
-          <div class="form-row">
-            <textarea id="pixPayload" class="input" rows="3" readonly></textarea>
-          </div>
-          <div class="row">
-            <button class="btn" id="copyPixBtn">Copiar código PIX</button>
-            <button class="btn ghost right" id="closePixBtn">Fechar</button>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Nova Comanda Modal -->
-  <div id="newModal" class="modal" aria-hidden="true">
-    <div class="panel">
-      <h3>Nova comanda</h3>
-      <div class="form-row">
-        <label>Nome</label>
-        <input id="newName" class="input" placeholder="Mesa 7, Cliente Ana…">
-      </div>
-      <div class="form-row">
-        <label>Etiqueta (opcional)</label>
-        <input id="newLabel" class="input" placeholder="Varanda, Delivery, VIP…">
-      </div>
-      <div class="form-row">
-        <label>Cor</label>
-        <div class="swatches" id="newColorSwatches"></div>
-      </div>
-      <div class="row">
-        <button class="btn accent" id="createComandaConfirm">Criar</button>
-        <button class="btn ghost right" id="cancelNew">Cancelar</button>
+        <button id="pixBtn" class="btn accent">PIX</button>
+        <button id="shareBtn" class="btn">Compartilhar</button>
+        <button id="pdfBtn" class="btn">PDF</button>
+        <button id="print80Btn" class="btn">Imprimir 80mm</button>
+        <button id="clearItemsBtn" class="btn warn">Limpar itens</button>
+        <button id="closeComandaBtn" class="btn danger">Fechar</button>
       </div>
     </div>
   </div>
 
-  <!-- Visão Geral -->
+  <!-- Modal: PIX -->
+  <div id="pixModal" class="modal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true">
+      <h3>Pagamento via PIX</h3>
+      <div id="pixQR" style="display:flex;justify-content:center;margin:10px 0"></div>
+      <input id="pixPayload" class="input" readonly>
+      <div class="row" style="margin-top:10px">
+        <button id="copyPixBtn" class="btn">Copiar código</button>
+        <button id="closePixBtn" class="btn">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Visão geral -->
   <div id="overviewModal" class="modal" aria-hidden="true">
-    <div class="panel">
-      <h3>Visão geral das comandas</h3>
-      <div id="board" class="board"></div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn ghost right" id="closeOverviewBtn">Fechar</button>
+    <div class="panel" role="dialog" aria-modal="true">
+      <h3>Comandas Abertas</h3>
+      <div id="board" class="form-row"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="closeOverviewBtn" class="btn">Fechar</button>
       </div>
     </div>
   </div>
 
-  <!-- Auxiliares invisíveis -->
-  <div id="qrHidden" style="position:absolute;left:-9999px;top:-9999px"></div>
+  <!-- Hidden target for QR toDataURL -->
+  <div id="qrHidden" class="hidden"></div>
+
+  <script src="./assets/firebase-config.js"></script>
+  <script src="./assets/db.firebase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="./assets/pos.js"></script>
 </body>
 </html>
