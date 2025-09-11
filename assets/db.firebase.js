@@ -1,41 +1,121 @@
 // assets/db.firebase.js
 (function(){
-  const cfg = window.FIREBASE_CONFIG || {};
-  const API = (cfg.BACKEND_URL || "").replace(/\/+$/,'');
-  const TENANT = cfg.TENANT_ID || "default";
+  const CFG    = window.FIREBASE_CONFIG || {};
+  const BASE   = (CFG.BACKEND_URL || '').replace(/\/+$/,''); // remove barra final
+  const TENANT = encodeURIComponent(CFG.TENANT_ID || 'default');
 
-  async function call(path, { method="GET", body } = {}){
-    if(!API) throw new Error("BACKEND_URL não configurada em assets/firebase-config.js");
-    const url = `${API}${path}${path.includes('?') ? '&' : '?'}tenant=${encodeURIComponent(TENANT)}`;
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: "omit",
-      cache: "no-cache",
-      mode: "cors"
-    });
-    const text = await res.text();
-    if(!res.ok) throw new Error(`${res.status} ${res.statusText} — ${text}`);
-    return text ? JSON.parse(text) : null;
+  function ensureBase(){
+    if(!BASE){
+      console.warn('[DB] BACKEND_URL vazio em firebase-config.js');
+      throw new Error('BACKEND_URL não configurado');
+    }
   }
 
-  const DB = {
-    enabled: !!API,
-    healthCheck: async ()=> await call("/health"),
-    getProducts: async ()=> (await call("/products")).products,
-    setProduct: async (p)=> { await call("/products", { method:"POST", body:p }); },
-    deleteProduct: async (id)=> { await call(`/products/${encodeURIComponent(id)}`, { method:"DELETE" }); },
-    getOpenTabs: async ()=> (await call("/tabs/open")).tabs,
-    upsertTab: async (tab)=> { await call("/tabs/upsert", { method:"POST", body:tab }); },
-    deleteTab: async (id)=> { await call(`/tabs/${encodeURIComponent(id)}`, { method:"DELETE" }); },
-    getHistory: async ()=> (await call("/history")).history,
-    saveHistory: async (rec)=> { await call("/history/save", { method:"POST", body:rec }); },
-    getSettings: async ()=> (await call("/settings")).settings || {},
-    setSettings: async (s)=> { await call("/settings", { method:"PATCH", body:s }); },
-    nextHistorySeq: async ()=> (await call("/seq/next", { method:"POST" })).value,
-    closeComanda: async (tab)=> (await call("/close-comanda", { method:"POST", body:tab })).record
+  function buildURL(path, params){
+    ensureBase();
+    const p = path.startsWith('/') ? path : `/${path}`;
+    const u = new URL(BASE + p);
+    u.searchParams.set('tenant', TENANT);
+    if(params && typeof params === 'object'){
+      for(const [k,v] of Object.entries(params)){ if(v!=null) u.searchParams.set(k, v); }
+    }
+    return u.toString();
+  }
+
+  async function jget(path, params){
+    const res = await fetch(buildURL(path, params), { method:'GET', cache:'no-store' });
+    if(!res.ok){
+      const t = await res.text().catch(()=>String(res.status));
+      throw new Error(`[GET ${path}] ${res.status} ${t}`);
+    }
+    return res.json();
+  }
+  async function jpost(path, body){
+    const res = await fetch(buildURL(path), {
+      method:'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body||{})
+    });
+    if(!res.ok){
+      const t = await res.text().catch(()=>String(res.status));
+      throw new Error(`[POST ${path}] ${res.status} ${t}`);
+    }
+    return res.json();
+  }
+  async function jdel(path){
+    const res = await fetch(buildURL(path), { method:'DELETE' });
+    if(!res.ok){
+      const t = await res.text().catch(()=>String(res.status));
+      throw new Error(`[DELETE ${path}] ${res.status} ${t}`);
+    }
+    return res.json();
+  }
+  async function jpatch(path, body){
+    const res = await fetch(buildURL(path), {
+      method:'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body||{})
+    });
+    if(!res.ok){
+      const t = await res.text().catch(()=>String(res.status));
+      throw new Error(`[PATCH ${path}] ${res.status} ${t}`);
+    }
+    return res.json();
+  }
+
+  // ========= API para o ADMIN (usa window.DB.* no seu admin.js) =========
+  window.DB = {
+    enabled: !!BASE,
+
+    async healthCheck(){
+      try{ return await jget('/health'); }
+      catch(e){ console.error(e); return { ok:false, error:String(e) }; }
+    },
+
+    // Admin espera um ARRAY direto
+    async getProducts(){
+      const r = await jget('/products');
+      return Array.isArray(r.products) ? r.products : [];
+    },
+
+    async setProduct(product){
+      // { id, name, category, price, image }
+      if(!product || !product.id) throw new Error('Produto sem id');
+      const r = await jpost('/products', product);
+      if(r && r.ok) return r;
+      throw new Error('Falha ao salvar produto');
+    },
+
+    async deleteProduct(id){
+      if(!id) throw new Error('ID vazio');
+      const r = await jdel(`/products/${encodeURIComponent(id)}`);
+      if(r && r.ok) return r;
+      throw new Error('Falha ao excluir produto');
+    }
   };
 
-  window.DB = DB;
+  // ========= API para o POS (usa window.API.* no pos.js) =========
+  window.API = {
+    enabled: !!BASE,
+
+    health(){ return jget('/health'); },
+
+    // POS espera { products: [...] }
+    listProducts(){ return jget('/products'); },
+
+    tabsOpen(){ return jget('/tabs/open'); },
+
+    upsertTab(tab){ return jpost('/tabs/upsert', tab); },
+
+    deleteTab(id){ return jdel(`/tabs/${encodeURIComponent(id)}`); },
+
+    closeComanda(payload){ return jpost('/close-comanda', payload); },
+
+    history(){ return jget('/history'); },
+
+    settings(){ return jget('/settings'); },
+
+    patchSettings(partial){ return jpatch('/settings', partial); }
+  };
+
 })();
