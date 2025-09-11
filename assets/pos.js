@@ -1,14 +1,9 @@
-/* pos.js — POS responsivo com fallback e guard rails
- * Compatível com o layout atual do seu index.html
- * - Tolerante à ausência temporária da API
- * - Bind de eventos robusto (inclui IDs duplicados p/ "Abrir comanda")
- * - Sessão salva (localStorage) + sync (se API disponível)
- * - PIX, PDF, impressão 80mm, Histórico (se endpoint existir)
- */
+/* pos.js — POS com Histórico, fechamento que remove da visão geral,
+   e sincronização cross-browser (polling + autosave/flush) */
 
 /* ========= Detecção de backend ========= */
-const API = (window.API || {});                     // exposto por assets/db.firebase.js
-const BACKEND_ON = !!(API && API.enabled);          // true se firebase-config e db.firebase.js ok
+const API = (window.API || {});
+const BACKEND_ON = !!(API && API.enabled);
 
 /* ========= Config ========= */
 const TENANT = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.TENANT_ID) || 'default';
@@ -21,7 +16,6 @@ const $   = s => document.querySelector(s);
 const $$  = s => Array.from(document.querySelectorAll(s));
 const uid = () => Math.random().toString(36).slice(2,10);
 const sum = arr => arr.reduce((a,b)=>a+b,0);
-const safe = (fn) => { try { return fn(); } catch(e){ console.warn(e); return void 0; } };
 
 /* ========= Produtos default (fallback) ========= */
 const DEFAULT_PRODUCTS = [
@@ -35,11 +29,11 @@ const DEFAULT_PRODUCTS = [
 
 /* ========= LocalStorage ========= */
 const LS = {
-  COMANDAS: 'comandas_v9',
-  ACTIVE:   'activeComandaId_v9',
-  PRODUCTS: 'products_cache_v5',
-  SERVICE:  'service10_v5',
-  BIGTOUCH: 'ui_big_touch_v5'
+  COMANDAS: 'comandas_v10',
+  ACTIVE:   'activeComandaId_v10',
+  PRODUCTS: 'products_cache_v6',
+  SERVICE:  'service10_v6',
+  BIGTOUCH: 'ui_big_touch_v6'
 };
 
 /* ========= Estado ========= */
@@ -48,12 +42,13 @@ let state = {
   categories: [],
   filterCat: 'Todos',
   query: '',
-  comandas: {},
+  comandas: {},                   // somente abertas
   activeComandaId: null,
   service10: JSON.parse(localStorage.getItem(LS.SERVICE) || 'false'),
   bigTouch: localStorage.getItem(LS.BIGTOUCH) === '1',
   inlineNew: { name:'Mesa 1', label:'', color:'#3b82f6' },
-  serverOK: false
+  serverOK: false,
+  historyCache: []
 };
 
 /* ========= Persistência ========= */
@@ -62,20 +57,18 @@ function loadPersisted(){
     state.comandas = JSON.parse(localStorage.getItem(LS.COMANDAS) || '{}');
     const a = localStorage.getItem(LS.ACTIVE);
     state.activeComandaId = (a && state.comandas[a]) ? a : null;
-  }catch(e){ console.warn('localStorage read error', e); }
+  }catch(e){}
 }
 function persist(){
-  try{
-    localStorage.setItem(LS.COMANDAS, JSON.stringify(state.comandas));
-    localStorage.setItem(LS.ACTIVE, state.activeComandaId || '');
-    localStorage.setItem(LS.SERVICE, JSON.stringify(state.service10));
-    localStorage.setItem(LS.BIGTOUCH, state.bigTouch ? '1' : '0');
-  }catch(e){ console.warn('localStorage write error', e); }
+  localStorage.setItem(LS.COMANDAS, JSON.stringify(state.comandas));
+  localStorage.setItem(LS.ACTIVE, state.activeComandaId || '');
+  localStorage.setItem(LS.SERVICE, JSON.stringify(state.service10));
+  localStorage.setItem(LS.BIGTOUCH, state.bigTouch ? '1' : '0');
 }
 
-/* ========= Health (opcional) ========= */
+/* ========= Health ========= */
 async function refreshHealth(){
-  const el = $('#dbStatus');       // opcional no seu HTML; se não existir, ignora
+  const el = $('#dbStatus'); // opcional
   if(!el) return;
   if(!BACKEND_ON){ el.textContent='DB: OFF'; el.style.borderColor='#ef4444'; return; }
   try{
@@ -91,10 +84,9 @@ async function refreshHealth(){
 
 /* ========= Produtos ========= */
 async function loadProducts(){
-  // 1) tenta API
   if(BACKEND_ON && API.listProducts){
     try{
-      const data = await API.listProducts();               // { products: [...] }
+      const data = await API.listProducts();
       const arr  = Array.isArray(data && data.products) ? data.products : [];
       if(arr.length){
         state.products = arr.map(p=>({
@@ -104,78 +96,72 @@ async function loadProducts(){
         }));
         state.categories = ['Todos', ...Array.from(new Set(state.products.map(p=>p.category)))];
         localStorage.setItem(LS.PRODUCTS, JSON.stringify(state.products));
-        console.log('[POS] produtos via API:', state.products.length);
         return;
       }
-    }catch(e){
-      console.warn('[POS] Falha ao carregar produtos da API, tentando cache/default.', e);
-    }
+    }catch(e){ /* segue para cache/default */ }
   }
-  // 2) cache local
   try{
     const cached = JSON.parse(localStorage.getItem(LS.PRODUCTS) || '[]');
     if(Array.isArray(cached) && cached.length){
       state.products = cached;
       state.categories = ['Todos', ...Array.from(new Set(cached.map(p=>p.category)))];
-      console.log('[POS] produtos via cache:', state.products.length);
       return;
     }
   }catch(e){}
-  // 3) default
   state.products = DEFAULT_PRODUCTS;
   state.categories = ['Todos', ...Array.from(new Set(DEFAULT_PRODUCTS.map(p=>p.category)))];
-  console.log('[POS] produtos default:', state.products.length);
 }
 
-/* ========= Sessão cross-browser (opcional com API) ========= */
-function asMapById(list){ const m={}; (list||[]).forEach(t=>{ m[t.id]=t; }); return m; }
-function touchTab(c){ c.updatedAt = Date.now(); persist(); scheduleSync(c.id); }
-
+/* ========= Sincronização de tabs (cross-browser) ========= */
 const syncTimers = {};
+function touchTab(c){ c.updatedAt = Date.now(); persist(); scheduleSync(c.id); }
 function scheduleSync(id){
   if(!BACKEND_ON || !API.upsertTab) return;
   clearTimeout(syncTimers[id]);
   syncTimers[id] = setTimeout(async ()=>{
-    try{ await API.upsertTab({ ...state.comandas[id], status:'open' }); }
-    catch(e){ console.warn('sync falhou', e); }
+    try{ await API.upsertTab({ ...state.comandas[id], status:'open' }); }catch(_){}
   }, 500);
 }
 function upsertKeepalive(tab){
-  // melhor esforço ao sair — db.firebase.js já envia com fetch keepalive
   if(!BACKEND_ON || !API.upsertTab) return;
   try{ API.upsertTab({ ...tab, status:'open' }); }catch(_){}
 }
 function flushAllTabs(){ Object.values(state.comandas).forEach(upsertKeepalive); }
 
+function asMapById(list){ const m={}; (list||[]).forEach(t=>{ m[t.id]=t; }); return m; }
 async function loadOpenTabsFromServer(){
   if(!BACKEND_ON || !API.tabsOpen) return false;
   try{
-    const res = await API.tabsOpen();
+    const res  = await API.tabsOpen();
     const tabs = Array.isArray(res.tabs)? res.tabs : [];
-    // merge simples: servidor substitui local se não houver conflito
-    const srv = asMapById(tabs);
-    const loc = state.comandas;
+    const srv  = asMapById(tabs);
+    const loc  = state.comandas;
 
+    // servidor substitui se for mais recente
     Object.keys(srv).forEach(id=>{
-      if(!loc[id] || Number(srv[id].updatedAt||0) >= Number(loc[id].updatedAt||0)){
-        loc[id] = { ...srv[id], items: srv[id].items || {}, status: srv[id].status || 'open', payMethod: srv[id].payMethod||'PIX' };
+      const s = srv[id];
+      if(!loc[id] || Number(s.updatedAt||0) >= Number(loc[id].updatedAt||0)){
+        loc[id] = { ...s, items: s.items || {}, status: 'open', payMethod: s.payMethod || 'PIX' };
       }
     });
-    // preserva locais que não existem no servidor
-    Object.keys(loc).forEach(id=>{
-      if(!srv[id]) return; // fica a local
-    });
-
+    // locais que não estão no servidor permanecem (serão upsertados via flush)
     if(!state.activeComandaId){
       const ids = Object.keys(loc);
       state.activeComandaId = ids[0] || null;
     }
     persist();
     return true;
-  }catch(e){
-    console.warn('tabs/open falhou', e);
-    return false;
-  }
+  }catch(e){ return false; }
+}
+function startPolling(){
+  if(!BACKEND_ON) return;
+  setInterval(async ()=>{
+    const ok = await loadOpenTabsFromServer();
+    if(ok){
+      refreshComandaSelect();
+      updateSummaryBar();
+    }
+  }, 7000);
 }
 
 /* ========= Comandas ========= */
@@ -205,22 +191,7 @@ function clearItems(){
   const c = getActive(); if(!c) return;
   c.items = {}; touchTab(c);
   updateSummaryBar();
-  const d = $('#drawer'); if(d && d.classList.contains('open')) renderDrawer();
-}
-function addToComanda(product, qty=1){
-  let c = getActive();
-  if(!c){
-    c = state.comandas[createComanda({
-      name:  (state.inlineNew.name||'Mesa 1'),
-      label: (state.inlineNew.label||''),
-      color: (state.inlineNew.color||'#22c55e')
-    })];
-  }
-  const current = c.items[product.id] || { id:product.id, name:product.name, unit:product.price, qty:0 };
-  current.qty += qty;
-  if(current.qty<=0) delete c.items[product.id]; else c.items[product.id] = current;
-  touchTab(c);
-  updateSummaryBar();
+  if($('#drawer')?.classList.contains('open')) renderDrawer();
 }
 function calc(c){
   const items = Object.values(c.items||{});
@@ -234,23 +205,29 @@ async function closeComanda(){
   const c = getActive(); if(!c) return;
   if(!confirm(`Fechar comanda "${c.name}"?`)) return;
 
+  // server-first: gera histórico e fecha tab
   if(BACKEND_ON && API.closeComanda){
     try{
       await API.closeComanda({ ...c, service10: state.service10 });
-      await loadOpenTabsFromServer();
+      // removida localmente para sumir da visão geral
+      delete state.comandas[c.id];
+      state.activeComandaId = Object.keys(state.comandas)[0] || null;
+      persist();
       refreshComandaSelect(); updateSummaryBar();
-      const d = $('#drawer'); if(d && d.classList.contains('open')) renderDrawer();
-      alert('Comanda fechada e salva no histórico.');
+      if($('#drawer')?.classList.contains('open')) $('#drawer').classList.remove('open');
+      alert('Comanda fechada e enviada ao histórico.');
       return;
     }catch(e){
-      console.warn('close-comanda falhou', e);
       alert('Falha ao fechar no servidor. Mantendo local.');
     }
   }
 
-  // fallback local
-  c.items = {}; touchTab(c);
-  const d = $('#drawer'); if(d && d.classList.contains('open')) renderDrawer();
+  // fallback local: apenas limpa/encerra
+  delete state.comandas[c.id];
+  state.activeComandaId = Object.keys(state.comandas)[0] || null;
+  persist();
+  refreshComandaSelect(); updateSummaryBar();
+  if($('#drawer')?.classList.contains('open')) $('#drawer').classList.remove('open');
 }
 
 /* ========= UI: filtros/cards ========= */
@@ -274,6 +251,21 @@ function passFilters(p){
 function getQty(productId){
   const c = getActive(); if(!c) return 0;
   return (c.items[productId] && c.items[productId].qty) || 0;
+}
+function addToComanda(product, qty=1){
+  let c = getActive();
+  if(!c){
+    c = state.comandas[createComanda({
+      name:  (state.inlineNew.name||'Mesa 1'),
+      label: (state.inlineNew.label||''),
+      color: (state.inlineNew.color||'#22c55e')
+    })];
+  }
+  const current = c.items[product.id] || { id:product.id, name:product.name, unit:product.price, qty:0 };
+  current.qty += qty;
+  if(current.qty<=0) delete c.items[product.id]; else c.items[product.id] = current;
+  touchTab(c);
+  updateSummaryBar();
 }
 function renderGrid(){
   const grid = $('#grid'); if(!grid) return;
@@ -304,11 +296,9 @@ function renderGrid(){
         <button class="btn" data-add>Adicionar</button>
       </div>`;
     const input = card.querySelector('input');
-    const bDec = card.querySelector('[data-act="dec"]');
-    const bInc = card.querySelector('[data-act="inc"]');
-    bDec.onclick=()=>{ input.value=Math.max(0,(parseInt(input.value)||0)-1) };
-    bInc.onclick=()=>{ input.value=Math.max(0,(parseInt(input.value)||0)+1) };
-    input.onfocus=()=> safe(()=>input.select());
+    card.querySelector('[data-act="dec"]').onclick=()=>{ input.value=Math.max(0,(parseInt(input.value)||0)-1) };
+    card.querySelector('[data-act="inc"]').onclick=()=>{ input.value=Math.max(0,(parseInt(input.value)||0)+1) };
+    input.onfocus=()=>input.select();
     card.querySelector('[data-add]').onclick=()=>{
       const q=Math.max(1,parseInt(input.value)||0);
       addToComanda(p,q); input.value=getQty(p.id);
@@ -388,7 +378,7 @@ function togglePixButton(){
   btn.style.display = (c.payMethod==='PIX') ? '' : 'none';
 }
 
-/* ========= PDF / PIX ========= */
+/* ========= Compartilhar / PDF / PIX ========= */
 function buildReceiptText(c){
   const {items, subtotal, service, total} = calc(c);
   const lines = [
@@ -410,7 +400,6 @@ function shareComanda(){
   if(navigator.share){ navigator.share({title:'Comanda', text}).catch(()=>{}); }
   else { navigator.clipboard.writeText(text).then(()=>alert('Resumo copiado!')).catch(()=>alert(text)); }
 }
-
 function sanitizeASCII(s=''){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,''); }
 function emvField(id, value){ const v=String(value); const len=String(v.length).padStart(2,'0'); return `${id}${len}${v}`; }
 function crc16(payload){
@@ -490,7 +479,7 @@ async function generatePDF(){
   doc.save(`comanda-${c.name.toLowerCase().replace(/\s+/g,'-')}.pdf`);
 }
 
-/* ========= Impressão térmica 80mm ========= */
+/* ========= Impressão 80mm ========= */
 function buildTicketHTML(c, totals, qrDataUrl = null){
   const created = new Date().toLocaleString('pt-BR');
   const itemsRows = Object.values(c.items||{}).map(i=>{
@@ -571,9 +560,89 @@ function renderOverview(){
       </div>`;
     div.querySelector('[data-open]').onclick=()=>{ setActive(id); const m=$('#overviewModal'); if(m) m.classList.remove('open'); updateSummaryBar(); };
     div.querySelector('[data-clear]').onclick=()=>{ state.comandas[id].items={}; touchTab(state.comandas[id]); renderOverview(); updateSummaryBar(); };
-    div.querySelector('[data-del]').onclick=async()=>{ if(confirm(`Excluir ${c.name}?`)){ await deleteActive(); renderOverview(); refreshComandaSelect(); updateSummaryBar(); } };
+    div.querySelector('[data-del]').onclick=async()=>{ if(confirm(`Excluir ${c.name}?`)){ delete state.comandas[id]; persist(); renderOverview(); refreshComandaSelect(); updateSummaryBar(); } };
     board.appendChild(div);
   });
+}
+
+/* ========= Histórico ========= */
+async function openHistory(){
+  if(!(BACKEND_ON && API.history)){ alert('Histórico indisponível (backend OFF).'); return; }
+  try{
+    const r = await API.history();
+    state.historyCache = Array.isArray(r.history) ? r.history : [];
+    renderHistory();
+    $('#historyModal')?.classList.add('open');
+  }catch(e){
+    alert('Falha ao carregar histórico.');
+  }
+}
+function renderHistory(){
+  const cont = $('#historyContainer'); if(!cont) return;
+  cont.innerHTML = '';
+  const arr = state.historyCache;
+  if(!arr.length){ cont.innerHTML='<div class="muted">Sem registros.</div>'; return; }
+  arr.forEach(rec=>{
+    const when = new Date(rec.closedAt || rec.createdAt || Date.now()).toLocaleString('pt-BR');
+    const div = document.createElement('div');
+    div.className='card';
+    div.innerHTML = `
+      <div class="flex">
+        <strong>#${String(rec.number||'').toString().padStart(6,'0')} — ${rec.name||'—'}</strong>
+        <span class="tag">${rec.payMethod||'—'}</span>
+      </div>
+      <div class="mini" style="margin-top:4px">${when}</div>
+      <div class="mini">Total: <strong>${BRL.format(Number(rec.total||0))}</strong> • Itens: ${rec.items?rec.items.length:0}</div>
+    `;
+    cont.appendChild(div);
+  });
+}
+function exportHistoryCSV(){
+  const rows = [
+    ['numero','comandaId','nome','etiqueta','pagamento','subtotal','servico','total','createdAt','closedAt']
+  ];
+  (state.historyCache||[]).forEach(r=>{
+    rows.push([
+      r.number, r.comandaId, r.name, r.label, r.payMethod,
+      Number(r.subtotal||0), Number(r.service||0), Number(r.total||0),
+      r.createdAt ? new Date(r.createdAt).toISOString() : '',
+      r.closedAt  ? new Date(r.closedAt ).toISOString() : ''
+    ]);
+  });
+  const csv = rows.map(l=>l.map(v=>{
+    const s = (v==null?'':String(v));
+    return /[",;\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(';')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'historico.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function exportHistoryPDF(){
+  const jspdfNS = (window.jspdf || {}); const jsPDF = jspdfNS.jsPDF;
+  if(typeof jsPDF !== 'function'){ alert('Biblioteca de PDF (jsPDF) não carregada.'); return; }
+  const doc = new jsPDF({orientation:'landscape'});
+  doc.setFontSize(12);
+  doc.text('Histórico de Comandas', 14, 14);
+  let y = 22;
+  const header = ['#','Nome','Pgto','Subtotal','Serviço','Total','Fechado'];
+  doc.text(header.join('  |  '), 14, y); y += 6;
+  (state.historyCache||[]).forEach(r=>{
+    const line = [
+      String(r.number||'').padStart(6,'0'),
+      r.name||'—',
+      r.payMethod||'—',
+      BRL.format(Number(r.subtotal||0)),
+      BRL.format(Number(r.service ||0)),
+      BRL.format(Number(r.total   ||0)),
+      r.closedAt ? new Date(r.closedAt).toLocaleString('pt-BR') : ''
+    ].join('  |  ');
+    doc.text(line, 14, y); y += 6;
+    if(y > 195){ doc.addPage(); y = 20; }
+  });
+  doc.save('historico.pdf');
 }
 
 /* ========= Controles ========= */
@@ -590,8 +659,6 @@ function refreshComandaSelect(){
     sel.appendChild(opt);
   });
 }
-
-/* ========= Inline "Nova comanda" ========= */
 function initInlineNew(){
   const pal = ['#3b82f6','#22c55e','#ef4444','#f59e0b','#8b5cf6','#06b6d4','#e11d48','#10b981','#a3e635','#f97316'];
   const sw = $('#ncColors'); if(sw){ sw.innerHTML=''; }
@@ -621,119 +688,71 @@ function initInlineNew(){
     };
   }
 }
-
-/* ========= Boot ========= */
 function bindGlobalEvents(){
-  // Botões duplicados "Abrir comanda" (existe no header e na barra)
+  // Abrir comanda (existem 2 botões com mesmo id)
   $$('#openDrawer').forEach(btn=>{
     btn.addEventListener('click', ()=>{ const d=$('#drawer'); if(d){ d.classList.add('open'); renderDrawer(); } });
   });
-  const closeDrawer = $('#closeDrawer'); if(closeDrawer){ closeDrawer.onclick = ()=>{ const d=$('#drawer'); if(d) d.classList.remove('open'); }; }
+  $('#closeDrawer')?.addEventListener('click', ()=> $('#drawer')?.classList.remove('open'));
 
-  const bigTouchBtn = $('#bigTouchBtn');
-  if(bigTouchBtn){
-    bigTouchBtn.addEventListener('click', ()=>{ state.bigTouch=!state.bigTouch; persist(); applyBigTouch(); });
-  }
+  $('#bigTouchBtn')?.addEventListener('click', ()=>{ state.bigTouch=!state.bigTouch; persist(); applyBigTouch(); });
+  $('#deleteComandaBtn')?.addEventListener('click', deleteActive);
+  $('#comandaSelect')?.addEventListener('change', e=> setActive(e.target.value));
+  $('#search')?.addEventListener('input', e=>{ state.query=e.target.value; renderGrid(); });
+  $('#clearSearch')?.addEventListener('click', ()=>{ const s=$('#search'); if(s){ s.value=''; } state.query=''; renderGrid(); });
 
-  const delBtn = $('#deleteComandaBtn'); if(delBtn) delBtn.onclick = deleteActive;
-  const sel = $('#comandaSelect'); if(sel) sel.onchange = (e)=> setActive(e.target.value);
+  $('#overviewBtn')?.addEventListener('click', ()=>{ renderOverview(); $('#overviewModal')?.classList.add('open'); });
+  $('#closeOverviewBtn')?.addEventListener('click', ()=> $('#overviewModal')?.classList.remove('open'));
 
-  const s = $('#search'); if(s) s.oninput = (e)=>{ state.query=e.target.value; renderGrid(); };
-  const cs = $('#clearSearch'); if(cs) cs.onclick = ()=>{ if(s){ s.value=''; } state.query=''; renderGrid(); };
+  // Novo: Histórico
+  $('#historyBtn')?.addEventListener('click', openHistory);
+  $('#closeHistoryBtn')?.addEventListener('click', ()=> $('#historyModal')?.classList.remove('open'));
+  $('#exportHistCsvBtn')?.addEventListener('click', exportHistoryCSV);
+  $('#exportHistPdfBtn')?.addEventListener('click', exportHistoryPDF);
 
-  const ov = $('#overviewBtn'); if(ov) ov.onclick = ()=>{ renderOverview(); const m=$('#overviewModal'); if(m) m.classList.add('open'); };
-  const cov = $('#closeOverviewBtn'); if(cov) cov.onclick = ()=>{ const m=$('#overviewModal'); if(m) m.classList.remove('open'); };
+  $('#sv10')?.addEventListener('change', e=>{ state.service10 = !!e.target.checked; persist(); const c=getActive(); if(c){ touchTab(c); } renderDrawer(); updateSummaryBar(); });
+  $('#shareBtn')?.addEventListener('click', shareComanda);
+  $('#pdfBtn')?.addEventListener('click', generatePDF);
+  $('#print80Btn')?.addEventListener('click', printThermal80);
+  $('#clearItemsBtn')?.addEventListener('click', ()=>{ if(confirm('Limpar todos os itens?')) clearItems(); });
+  $('#closeComandaBtn')?.addEventListener('click', closeComanda);
 
-  const imp = $('#importProductsBtn'), file = $('#importFile');
-  if(imp && file){
-    imp.onclick = ()=> file.click();
-    file.addEventListener('change', e=>{
-      const f = e.target.files && e.target.files[0];
-      if(!f) return;
-      const r = new FileReader();
-      r.onload = ev=>{
-        try{
-          const arr = JSON.parse(ev.target.result);
-          if(!Array.isArray(arr)) throw new Error('JSON precisa ser array');
-          state.products = arr.map(p=>({
-            id:String(p.id), name:String(p.name), category:String(p.category||'Outros'),
-            price:Number(p.price||0), image:String(p.image||'').trim()||'./assets/placeholder.svg'
-          }));
-          state.categories = ['Todos', ...Array.from(new Set(state.products.map(p=>p.category)))];
-          localStorage.setItem(LS.PRODUCTS, JSON.stringify(state.products));
-          refreshChips(); renderGrid();
-          alert('Produtos importados!');
-        }catch(err){ alert('Erro ao importar: '+err.message); }
-      };
-      r.readAsText(f);
-      e.target.value='';
-    });
-  }
-
-  const sv = $('#sv10'); if(sv) sv.onchange = (e)=>{ state.service10 = !!e.target.checked; persist(); const c=getActive(); if(c){ touchTab(c); } renderDrawer(); updateSummaryBar(); };
-
-  const sh = $('#shareBtn'); if(sh) sh.onclick = shareComanda;
-  const pdf = $('#pdfBtn'); if(pdf) pdf.onclick = generatePDF;
-  const p80 = $('#print80Btn'); if(p80) p80.onclick = printThermal80;
-  const clr = $('#clearItemsBtn'); if(clr) clr.onclick = ()=>{ if(confirm('Limpar todos os itens?')) clearItems(); };
-  const close = $('#closeComandaBtn'); if(close) close.onclick = closeComanda;
-
-  const pixBtn = $('#pixBtn');
-  if(pixBtn){
-    pixBtn.onclick = async ()=>{
-      const c=getActive(); if(!c) return;
-      const t=calc(c); const payload = buildPixPayload(t.total, c.id);
-      const box = $('#pixQR'); if(box){ box.innerHTML=''; if(typeof QRCode !== 'undefined'){ new QRCode(box, {text: payload, width:220, height:220, correctLevel: (window.QRCode && QRCode.CorrectLevel && QRCode.CorrectLevel.M) || 0}); } }
-      const input = $('#pixPayload'); if(input){ input.value = payload; }
-      const m = $('#pixModal'); if(m) m.classList.add('open');
-    };
-    const closePix = $('#closePixBtn'); if(closePix) closePix.onclick = ()=>{ const m=$('#pixModal'); if(m) m.classList.remove('open'); };
-    const copyPix = $('#copyPixBtn'); if(copyPix) copyPix.onclick = ()=>{ const t=$('#pixPayload'); if(t){ t.select(); document.execCommand('copy'); alert('Código PIX copiado!'); } };
-  }
+  $('#pixBtn')?.addEventListener('click', async ()=>{
+    const c=getActive(); if(!c) return;
+    const t=calc(c); const payload = buildPixPayload(t.total, c.id);
+    const box = $('#pixQR'); if(box){ box.innerHTML=''; if(typeof QRCode !== 'undefined'){ new QRCode(box, {text: payload, width:220, height:220, correctLevel: (window.QRCode && QRCode.CorrectLevel && QRCode.CorrectLevel.M) || 0}); } }
+    const input = $('#pixPayload'); if(input){ input.value = payload; }
+    $('#pixModal')?.classList.add('open');
+  });
+  $('#closePixBtn')?.addEventListener('click', ()=> $('#pixModal')?.classList.remove('open'));
+  $('#copyPixBtn')?.addEventListener('click', ()=>{ const t=$('#pixPayload'); if(t){ t.select(); document.execCommand('copy'); alert('Código PIX copiado!'); } });
 
   // fechar modais ao clicar no backdrop
   $$('.modal').forEach(m=> m.addEventListener('click', (ev)=>{ if(ev.target===m) m.classList.remove('open'); }));
 
-  // flush sessão ao sair
+  // flush ao sair/ocultar
   window.addEventListener('beforeunload', flushAllTabs);
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden) flushAllTabs(); });
 }
-
 function applyBigTouch(){
   document.body.classList.toggle('big-touch', !!state.bigTouch);
   const b = $('#bigTouchBtn');
   if(b){ b.textContent = state.bigTouch ? 'Toque grande: ON' : 'Toque grande'; b.setAttribute('aria-pressed', state.bigTouch?'true':'false'); }
 }
 
+/* ========= Boot ========= */
 async function boot(){
-  try{
-    loadPersisted();
-    await refreshHealth();
-    await loadProducts();                 // preenche state.products/categories
+  loadPersisted();
+  await refreshHealth();
+  await loadProducts();
+  await loadOpenTabsFromServer();
 
-    // tenta sincronizar tabs do servidor; se falhar, fica só local
-    await loadOpenTabsFromServer();
-
-    // se não houver comanda ativa ainda, cria uma padrão
-    if(!state.activeComandaId){
-      createComanda({name:'Mesa 1', color:'#22c55e'});
-    }
-
-    // UI inicial
-    applyBigTouch();
-    refreshChips();
-    refreshComandaSelect();
-    renderGrid();
-    updateSummaryBar();
-    initInlineNew();
-
-    // eventos
-    bindGlobalEvents();
-
-    console.log('[POS] pronto. BACKEND_ON=', BACKEND_ON, 'products=', state.products.length);
-  }catch(err){
-    console.error('Falha no boot do POS:', err);
-    alert('Falha ao iniciar a tela de vendas. Verifique o console do navegador.');
+  if(!state.activeComandaId){
+    createComanda({name:'Mesa 1', color:'#22c55e'});
   }
+
+  applyBigTouch();
+  refreshChips(); refreshComandaSelect(); renderGrid(); updateSummaryBar();
+  initInlineNew(); bindGlobalEvents(); startPolling();
 }
 document.addEventListener('DOMContentLoaded', boot);

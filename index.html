@@ -21,8 +21,8 @@
           <button id="overviewBtn" class="btn">Visão geral</button>
           <select id="comandaSelect" class="select" style="min-width:160px"></select>
           <button id="deleteComandaBtn" class="btn danger">Excluir</button>
-          <button id="importProductsBtn" class="btn">Importar produtos</button>
-          <input id="importFile" class="hidden" type="file" accept="application/json">
+          <!-- Substituído: Importar produtos -> Histórico -->
+          <button id="historyBtn" class="btn">Histórico</button>
         </div>
       </div>
 
@@ -118,9 +118,28 @@
     </div>
   </div>
 
+  <!-- Modal: Histórico -->
+  <div id="historyModal" class="modal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true">
+      <h3>Histórico</h3>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button id="exportHistCsvBtn" class="btn">Exportar CSV</button>
+        <button id="exportHistPdfBtn" class="btn">Exportar PDF</button>
+      </div>
+      <div id="historyContainer" class="form-row" style="max-height:60vh;overflow:auto"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="closeHistoryBtn" class="btn">Fechar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Hidden target for QR toDataURL -->
   <div id="qrHidden" class="hidden"></div>
 
+  <script src="./assets/firebase-config.js"></script>
+  <script src="./assets/db.firebase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="./assets/pos.js"></script>
 </body>
 </html>
